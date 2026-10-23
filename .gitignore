@@ -1,0 +1,42 @@
+# Local experiments and machine-specific evidence (kept on disk).
+/results/
+/医疗项目/
+/local/
+/handeye/
+/.codex/
+/.agents/
+/.aws/
+.env
+.env.*
+!.env.example
+*.local.json
+*.local.yaml
+*.local.yml
+
+# Python/ROS build products.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+build/
+install/
+log/
+*.egg-info/
+dist/
+
+# Raw recordings, SDK installers, datasets, and model weights.
+*.bag
+*.db3
+*.mcap
+*.npy
+*.npz
+*.onnx
+*.pt
+*.pth
+*.engine
+*.zip
+*.exe
+*.dll
+*.so
+*.pid
