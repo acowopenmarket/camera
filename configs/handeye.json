@@ -21,7 +21,7 @@
   ],
   "grasp_orientation_operator_confirmed_for_calculation": true,
   "gripper_offset_physically_verified": false,
-  "grasp_point_selection": "require_confirmed_point_or_explicit_base_z",
+  "grasp_point_selection": "measured_top_surface_center",
   "grasp_orientation_motion_verified": false,
   "max_reprojection_px": 0.8,
   "max_sync_sec": 0.05,

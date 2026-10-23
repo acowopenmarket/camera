@@ -41,6 +41,7 @@ def main():
     tar.add_argument('--grasp',required=True); tar.add_argument('--output',required=True)
     tar.add_argument('--allow-unvalidated-preview',action='store_true')
     selection=tar.add_mutually_exclusive_group()
+    selection.add_argument('--use-top-surface-center',action='store_true',help='Use measured object top center directly, without subtracting half the object height; requires observation point_kind=top_surface_center')
     selection.add_argument('--point-is-grasp-center',action='store_true',help='Explicitly confirm the input is the selected gripping center, not just visible surface center')
     selection.add_argument('--grasp-height-base-z',type=float,help='Explicitly selected gripping height in base frame, metres; not flange Z')
     med=sub.add_parser('medical-observation'); med.add_argument('--item',required=True)
@@ -58,7 +59,8 @@ def main():
             print(json.dumps({k:result[k] for k in ('status','selected_method','training','validation','depth_fixed_point_validation')},indent=2))
         elif args.command=='target':
             result=plan_observation(load(args.observation),load(args.calibration),load(args.grasp),config,robot,
-                args.allow_unvalidated_preview,args.point_is_grasp_center,args.grasp_height_base_z)
+                args.allow_unvalidated_preview,args.point_is_grasp_center,args.grasp_height_base_z,
+                args.use_top_surface_center)
             save(args.output,result)
             print('Target flange pose (READ ONLY):')
             for name,value,unit in zip(('x','y','z','rx','ry','rz'),result['flange_pose'],('m','m','m','rad','rad','rad')):

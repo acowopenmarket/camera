@@ -138,15 +138,20 @@ def compensate_gripper(point_base, R_base_flange_target, T_flange_gripper):
     return p-r@transform(T_flange_gripper)[:3,3]
 
 
-def select_grasp_point(point_base, point_confirmed=False, grasp_height_base_z_m=None):
-    """A measured visible surface is not automatically a two-finger grasp center.
+def select_grasp_point(point_base, point_confirmed=False, grasp_height_base_z_m=None,
+                       use_top_surface_center=False):
+    """Select the contact/gripping reference, never infer half the object height.
 
     An explicit height selects a NEW grasp point; it never repairs a flange Z
     violation and is recorded separately from the observed point.
     """
     measured=finite_vector(point_base,3)
     selected=measured.copy()
-    if grasp_height_base_z_m is not None:
+    if use_top_surface_center:
+        if point_confirmed or grasp_height_base_z_m is not None:
+            raise ValueError('Choose only one grasp point policy')
+        mode='measured_top_surface_center'
+    elif grasp_height_base_z_m is not None:
         if isinstance(grasp_height_base_z_m,bool) or not math.isfinite(grasp_height_base_z_m):
             raise ValueError('Grasp height must be finite base-frame Z in metres')
         selected[2]=grasp_height_base_z_m
@@ -154,7 +159,7 @@ def select_grasp_point(point_base, point_confirmed=False, grasp_height_base_z_m=
     elif point_confirmed is True:
         mode='operator_confirmed_3d_grasp_point'
     else:
-        raise ValueError('GRASP_HEIGHT_REQUIRED: confirm the supplied 3D grasp point or explicitly supply base-frame grasp height; visible surface depth is not a gripping center')
+        raise ValueError('GRASP_POINT_REQUIRED: select measured top surface center, confirm the supplied 3D grasp point, or explicitly supply base-frame grasp height')
     return selected,dict(mode=mode,observed_point_base_m=measured.tolist(),
                          selected_grasp_point_base_m=selected.tolist(),
                          height_difference_m=float(selected[2]-measured[2]),
@@ -166,12 +171,21 @@ def target_components(point_base, grasp_rpy, robot, offset=(0.,0.,.15384), refer
     if not math.isfinite(min_flange_z) or min_flange_z < .201:
         raise ValueError('Flange Z limit cannot be relaxed below 0.201 m')
     p = compensate_gripper(point_base, robot.rotation(grasp_rpy), flange_to_gripper(offset))
+    original_pose = robot.components(p, grasp_rpy, reference_rpy)
+    original_z_ok = bool(p[2] >= min_flange_z)
+    z_adjustment = max(0., float(min_flange_z-p[2]))
+    p[2] = max(float(p[2]), float(min_flange_z))
     pose = robot.components(p, grasp_rpy, reference_rpy)
     reconstructed = p+robot.rotation(pose[3:])@finite_vector(offset,3)
     error = float(np.linalg.norm(reconstructed-finite_vector(point_base,3)))
-    ok = bool(p[2] >= min_flange_z)  # no clamp, including at boundary
-    return dict(flange_pose=pose, z_limit_ok=ok, min_flange_z_m=min_flange_z,
-                reason='' if ok else '目标高度不可达：计算的法兰 Z 低于 0.201 m，未修改目标',
+    ok = bool(p[2] >= min_flange_z)
+    return dict(flange_pose=pose, original_flange_pose=original_pose,
+                z_limit_ok=ok, original_z_limit_ok=original_z_ok,
+                z_clamped=not original_z_ok, z_adjustment_m=z_adjustment,
+                min_flange_z_m=min_flange_z,
+                reason='' if original_z_ok else '法兰 Z 已提升至设定下限；夹爪参考点同步升高，不再与原目标点重合',
+                requested_gripper_point_base_m=finite_vector(point_base,3).tolist(),
+                gripper_point_error_base_m=(reconstructed-finite_vector(point_base,3)).tolist(),
                 gripper_center_reconstructed_m=reconstructed.tolist(), compensation_error_m=error,
-                robotmove_preview=robot.robotmove_preview(pose) if ok else None,
+                robotmove_preview=robot.robotmove_preview(pose),
                 executable=False, motion_sent=False)

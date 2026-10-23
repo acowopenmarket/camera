@@ -3,7 +3,8 @@ from .geometry import camera_to_base, target_components, finite_vector, select_g
 
 
 def plan_observation(observation,calibration,grasp,config,robot,allow_preview=False,
-                     point_is_grasp_center=False,grasp_height_base_z_m=None):
+                     point_is_grasp_center=False,grasp_height_base_z_m=None,
+                     use_top_surface_center=False):
     if observation.get('robot_fault')!=0: raise ValueError('Observation robot fault missing/nonzero')
     if observation.get('camera_frame')!=calibration['camera_frame']: raise ValueError('Camera optical frame mismatch')
     if observation.get('camera_info')!=calibration['camera_info']:
@@ -22,9 +23,16 @@ def plan_observation(observation,calibration,grasp,config,robot,allow_preview=Fa
         raise ValueError('Need real held-out validated calibration and operator-confirmed grasp; numerical preview requires explicit --allow-unvalidated-preview')
     p=finite_vector(observation['point_camera_m'],3)
     base=camera_to_base(p,robot.pose_matrix(observation['robot_pose_at_capture']),calibration['T_flange_camera'])
+    # Default to the operator-selected surface policy, without reinterpreting
+    # an existing volume-center observation as a surface measurement.
+    if (not point_is_grasp_center and grasp_height_base_z_m is None and
+            config.get('grasp_point_selection')=='measured_top_surface_center'):
+        use_top_surface_center=True
+    if use_top_surface_center and observation.get('point_kind')!='top_surface_center':
+        raise ValueError('TOP_SURFACE_CENTER_REQUIRED: input must be measured at the object top center; a volume center or arbitrary pixel cannot be relabelled')
     selected,selection=select_grasp_point(base,
-        point_is_grasp_center or observation.get('grasp_point_confirmed') is True,
-        grasp_height_base_z_m)
+        point_is_grasp_center or (not use_top_surface_center and observation.get('grasp_point_confirmed') is True),
+        grasp_height_base_z_m,use_top_surface_center)
     result=target_components(selected,grasp['grasp_rpy_rad'],robot,config['flange_to_gripper_m'],
                              grasp['grasp_rpy_rad'],config['min_flange_z_m'])
     offset_verified=(grasp.get('gripper_offset_physically_verified',False) is True and

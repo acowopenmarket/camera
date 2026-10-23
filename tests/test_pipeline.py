@@ -67,15 +67,35 @@ class ReadOnlyTests(unittest.TestCase):
         r=target_components([.4,.1,.5],[0,math.pi/2,0],self.robot)
         np.testing.assert_allclose(r['flange_pose'][:3],[.24616,.1,.5],atol=1e-14)
 
-    def test_below_z_refused_without_clamp(self):
+    def test_below_z_outputs_clamped_pose_and_real_point_error(self):
         r=target_components([.1,.1,.3],[0,0,0],self.robot)
-        self.assertFalse(r['z_limit_ok']); self.assertIsNone(r['robotmove_preview'])
-        self.assertAlmostEqual(r['flange_pose'][2],.14616)
+        self.assertTrue(r['z_limit_ok']); self.assertTrue(r['z_clamped'])
+        self.assertFalse(r['original_z_limit_ok'])
+        self.assertAlmostEqual(r['original_flange_pose'][2],.14616)
+        self.assertAlmostEqual(r['flange_pose'][2],.201)
+        np.testing.assert_allclose(r['flange_pose'][:2],[.1,.1])
+        np.testing.assert_allclose(r['flange_pose'][3:],[0,0,0])
+        self.assertEqual(r['robotmove_preview']['points'][0]['positions'],r['flange_pose'])
+        self.assertAlmostEqual(r['z_adjustment_m'],.05484)
+        np.testing.assert_allclose(r['gripper_point_error_base_m'],[0,0,.05484],atol=1e-14)
+        self.assertAlmostEqual(r['compensation_error_m'],.05484)
         self.assertFalse(r['executable'])
 
     def test_exact_z_limit(self):
         r=target_components([.1,.1,.201],[0,0,0],self.robot,offset=[0,0,0])
         self.assertTrue(r['z_limit_ok'])
+        self.assertFalse(r['z_clamped']); self.assertEqual(r['z_adjustment_m'],0.)
+
+    def test_above_limit_pose_unchanged(self):
+        r=target_components([.1,.2,.5],[-math.pi,0,0],self.robot)
+        self.assertEqual(r['flange_pose'],r['original_flange_pose'])
+        self.assertFalse(r['z_clamped'])
+        self.assertLess(r['compensation_error_m'],1e-14)
+
+    def test_configured_higher_limit_is_applied(self):
+        r=target_components([.1,.2,.1],[-math.pi,0,0],self.robot,min_flange_z=.3)
+        self.assertAlmostEqual(r['flange_pose'][2],.3)
+        self.assertTrue(r['z_clamped'])
 
     def test_cannot_lower_limit(self):
         with self.assertRaises(ValueError): target_components([0,0,.4],[0,0,0],self.robot,min_flange_z=.2)
@@ -154,17 +174,69 @@ class ReadOnlyTests(unittest.TestCase):
     def test_visible_surface_needs_height_confirmation(self):
         with self.assertRaises(ValueError): select_grasp_point([.4,.1,.1])
 
+    def test_top_surface_grasp_preserves_measured_height(self):
+        top=[.32338566,.23788105,.10595149]
+        selected,metadata=select_grasp_point(top,use_top_surface_center=True)
+        np.testing.assert_allclose(selected,top)
+        self.assertEqual(metadata['mode'],'measured_top_surface_center')
+        self.assertEqual(metadata['height_difference_m'],0.)
+        result=target_components(selected,[-math.pi,0,0],self.robot)
+        self.assertAlmostEqual(result['flange_pose'][2],.25979149)
+        self.assertFalse(result['executable'])
+
+    def test_top_surface_policy_rejects_conflicting_height(self):
+        with self.assertRaises(ValueError):
+            select_grasp_point([.4,.1,.1],grasp_height_base_z_m=.05,use_top_surface_center=True)
+        with self.assertRaises(ValueError):
+            select_grasp_point([.4,.1,.1],point_confirmed=True,use_top_surface_center=True)
+
+    def test_top_surface_pipeline_requires_matching_point_semantics(self):
+        cfg,samples,_,_=synthetic_samples(self.robot); cal=solve(samples,cfg,self.robot)
+        obs=dict(robot_fault=0,camera_frame=cfg['camera_frame'],camera_info=cal['camera_info'],
+                 convention=self.robot.evidence(),robot_stamp=1.,image_stamp=1.,capture_sync_error_sec=0.,
+                 point_camera_m=[0,0,.5],robot_pose_at_capture=samples[0]['robot_pose'])
+        grasp=dict(convention=self.robot.evidence(),operator_confirmed_for_calculation=True,grasp_rpy_rad=[-math.pi,0,0])
+        with self.assertRaisesRegex(ValueError,'TOP_SURFACE_CENTER_REQUIRED'):
+            plan_observation(obs,cal,grasp,cfg,self.robot,True,use_top_surface_center=True)
+        obs['point_kind']='top_surface_center'
+        result=plan_observation(obs,cal,grasp,cfg,self.robot,True,use_top_surface_center=True)
+        np.testing.assert_allclose(result['selected_grasp_point_base_m'],result['point_base_m'])
+        self.assertFalse(result['motion_sent'])
+
+    def test_default_top_surface_policy_uses_measured_point(self):
+        cfg,samples,_,_=synthetic_samples(self.robot); cal=solve(samples,cfg,self.robot)
+        cfg['grasp_point_selection']='measured_top_surface_center'
+        obs=dict(robot_fault=0,camera_frame=cfg['camera_frame'],camera_info=cal['camera_info'],
+                 convention=self.robot.evidence(),robot_stamp=1.,image_stamp=1.,capture_sync_error_sec=0.,
+                 point_camera_m=[0,0,.5],robot_pose_at_capture=samples[0]['robot_pose'])
+        grasp=dict(convention=self.robot.evidence(),operator_confirmed_for_calculation=True,grasp_rpy_rad=[-math.pi,0,0])
+        with self.assertRaisesRegex(ValueError,'TOP_SURFACE_CENTER_REQUIRED'):
+            plan_observation(obs,cal,grasp,cfg,self.robot,True)
+        obs['point_kind']='top_surface_center'
+        result=plan_observation(obs,cal,grasp,cfg,self.robot,True)
+        np.testing.assert_allclose(result['selected_grasp_point_base_m'],result['point_base_m'])
+        self.assertEqual(result['grasp_point_selection']['mode'],'measured_top_surface_center')
+        self.assertFalse(result['motion_sent'])
+
+    def test_top_surface_still_obeys_flange_z_limit(self):
+        selected,_=select_grasp_point([.4,.1,.03],use_top_surface_center=True)
+        result=target_components(selected,[-math.pi,0,0],self.robot)
+        self.assertTrue(result['z_limit_ok']); self.assertTrue(result['z_clamped'])
+        self.assertAlmostEqual(result['flange_pose'][2],.201)
+        self.assertIsNotNone(result['robotmove_preview'])
+
     def test_selected_grip_height_is_not_surface_height(self):
         selected,metadata=select_grasp_point([.4,.1,.12],grasp_height_base_z_m=.08)
         np.testing.assert_allclose(selected,[.4,.1,.08])
         self.assertAlmostEqual(metadata['height_difference_m'],-.04)
         self.assertFalse(metadata['is_flange_z_clamp'])
 
-    def test_selected_height_still_rejects_low_flange(self):
+    def test_selected_height_low_flange_is_clamped(self):
         selected,_=select_grasp_point([.4,.1,.12],grasp_height_base_z_m=.03)
         r=target_components(selected,[-math.pi,0,0],self.robot)
-        self.assertFalse(r['z_limit_ok']); self.assertAlmostEqual(r['flange_pose'][2],.18384)
-        self.assertIsNone(r['robotmove_preview'])
+        self.assertTrue(r['z_limit_ok']); self.assertAlmostEqual(r['flange_pose'][2],.201)
+        self.assertAlmostEqual(r['original_flange_pose'][2],.18384)
+        self.assertIsNotNone(r['robotmove_preview'])
 
     def test_provisional_offset_blocks_motion_review(self):
         cfg,samples,_,_=synthetic_samples(self.robot)

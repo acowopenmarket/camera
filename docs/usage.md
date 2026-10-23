@@ -55,12 +55,14 @@ python3 -m handeye_calibration.cli solve \
 python3 -m handeye_calibration.cli target \
   --calibration results/handeye_current/calibration.json \
   --observation results/handeye_current/target_observation.json \
-  --grasp configs/grasp_down.example.json --point-is-grasp-center \
+  --grasp configs/grasp_down.example.json \
   --output results/flange_target.json
 ```
 
-仅在输入点确实是选定夹持中心时使用 `--point-is-grasp-center`；可见表面点需改用 `--grasp-height-base-z` 显式指定基座系夹持高度（米）。夹持高度不等于法兰高度。
+默认采用顶部中心作为夹爪参考点：观测文件的 `point_camera_m` 必须是实测盒顶中心，并设置 `"point_kind": "top_surface_center"`。上例去掉 `--point-is-grasp-center` 即使用配置中的默认顶面策略；也可显式使用 `--use-top-surface-center`。程序直接使用其高度，不减去半个盒高，也不要求测量盒高。不能把已有体积中心坐标仅修改标签后当作顶部中心。
 
-输出 `x,y,z`（米）、`rx,ry,rz`（弧度）及兼容字段数组；Z下限失败会明确标记。示例朝向和偏移为本次操作者确认的计算参数，偏移仍需实物验证。程序不发送运动，不代表已通过碰撞、可达性或真实定位验证。
+其他目标可使用 `--point-is-grasp-center` 显式确认输入点就是所需夹爪参考点，或用 `--grasp-height-base-z` 指定基座系夹持高度（米）；三个选项互斥。夹持高度不等于法兰高度。抓取点选择与物体几何中心是不同概念，不默认按半高抓取。
+
+输出 `x,y,z`（米）、`rx,ry,rz`（弧度）及兼容字段数组。低于法兰 Z 下限时，输出 Z 自动提升到配置下限（默认0.201 m），其余分量不变，不因该条件取消 RobotMove 预览。`original_flange_pose` 保留原值，`z_clamped` 表示是否调整，`z_adjustment_m` 是提升量，`gripper_point_error_base_m` 是调整后夹爪相对原目标的偏差。`z_limit_ok` 检查输出值，`original_z_limit_ok` 检查原始计算值。示例朝向和偏移为本次操作者确认的计算参数，偏移仍需实物验证。程序不发送运动，不代表已通过碰撞、可达性或真实定位验证。
 
 `medical-observation` 对接既有医疗项目三维中心，要求源图、深度几何、单位和同步信息明确；不能直接信任缺少时间戳的旧 HTTP 返回。

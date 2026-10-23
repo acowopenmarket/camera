@@ -20,5 +20,5 @@
   "jaw_mode": "two_finger_side_closing",
   "yaw_policy": "fixed_at_user_specified_zero",
   "source": "User specified nominal rx=-180deg,ry=0deg,rz=0deg; +Z153.84mm provisional",
-  "grasp_point_selection": "explicit gripping center or explicitly selected base-frame height required"
+  "grasp_point_selection": "measured_top_surface_center"
 }
